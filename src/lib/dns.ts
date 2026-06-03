@@ -47,7 +47,7 @@ export function mongoDnsResolverCandidates() {
   ]);
 }
 
-export function useMongoDnsServers(servers: string[]) {
+export function setMongoDnsServers(servers: string[]) {
   setServers(servers);
 }
 

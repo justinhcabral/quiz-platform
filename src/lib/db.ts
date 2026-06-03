@@ -1,7 +1,8 @@
 /**
  * Native MongoDB driver singleton.
  *
- * - DNS SRV lookup retries several resolver sets before giving up (see ./dns).
+ * - In local development, DNS SRV lookup can retry several resolver sets.
+ *   Production uses the platform/driver default DNS resolution.
  * - In dev, the client promise is cached on `globalThis` so Next.js HMR
  *   doesn't open a fresh pool on every reload.
  * - The DB name is taken from the URI path (e.g. `.../youquizz`) unless
@@ -12,7 +13,12 @@
  * mongoose features (schemas, hooks).
  */
 
-import { isSrvLookupFailure, mongoDnsResolverCandidates, restoreOriginalDns, useMongoDnsServers } from "./dns";
+import {
+  isSrvLookupFailure,
+  mongoDnsResolverCandidates,
+  restoreOriginalDns,
+  setMongoDnsServers,
+} from "./dns";
 import { MongoClient, type Db } from "mongodb";
 
 declare global {
@@ -33,11 +39,15 @@ async function createClientPromise(): Promise<MongoClient> {
     throw new Error("MONGODB_URI is not set. Add it to .env.local.");
   }
 
+  if (process.env.NODE_ENV === "production") {
+    return connectClient(uri);
+  }
+
   let lastSrvError: unknown;
 
   for (const servers of mongoDnsResolverCandidates()) {
     try {
-      useMongoDnsServers(servers);
+      setMongoDnsServers(servers);
       return await connectClient(uri);
     } catch (err) {
       if (!isSrvLookupFailure(err)) throw err;

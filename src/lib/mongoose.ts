@@ -1,7 +1,8 @@
 /**
  * Mongoose connection singleton.
  *
- * - DNS SRV lookup retries several resolver sets before giving up (see ./dns).
+ * - In local development, DNS SRV lookup can retry several resolver sets.
+ *   Production uses the platform/driver default DNS resolution.
  * - Cached on `globalThis` so Next.js HMR / Lambda warm starts reuse the
  *   same connection instead of leaking pools.
  * - The DB name is taken from the URI path unless `MONGODB_DB` overrides.
@@ -10,7 +11,12 @@
  * slice-3 repository use the native driver via ./db.ts.
  */
 
-import { isSrvLookupFailure, mongoDnsResolverCandidates, restoreOriginalDns, useMongoDnsServers } from "./dns";
+import {
+  isSrvLookupFailure,
+  mongoDnsResolverCandidates,
+  restoreOriginalDns,
+  setMongoDnsServers,
+} from "./dns";
 import mongoose, { type Mongoose } from "mongoose";
 
 interface MongooseCache {
@@ -44,11 +50,15 @@ export async function connectMongoose(): Promise<Mongoose> {
 
   if (!cache.promise) {
     cache.promise = (async () => {
+      if (process.env.NODE_ENV === "production") {
+        return connect(uri);
+      }
+
       let lastSrvError: unknown;
 
       for (const servers of mongoDnsResolverCandidates()) {
         try {
-          useMongoDnsServers(servers);
+          setMongoDnsServers(servers);
           return await connect(uri);
         } catch (err) {
           if (!isSrvLookupFailure(err)) throw err;

@@ -20,6 +20,10 @@ export interface QuizLoadSuccess {
 
 export type QuizLoadResult = QuizLoadSuccess | QuizLoadError;
 
+function isProductionBuild() {
+  return process.env.NEXT_PHASE === "phase-production-build";
+}
+
 function objectIdToString(id: unknown): unknown {
   return id instanceof ObjectId ? id.toHexString() : id;
 }
@@ -54,6 +58,8 @@ export function validateQuizPakDocument(doc: Document): QuizLoadSuccess | QuizLo
 }
 
 export async function ensureQuizIndexes() {
+  if (isProductionBuild()) return;
+
   const db = await getDb();
   const collection = db.collection(QUIZ_COLLECTION);
   await Promise.all([
@@ -63,6 +69,8 @@ export async function ensureQuizIndexes() {
 }
 
 export async function listPublishedValidQuizPaks(): Promise<QuizPak[]> {
+  if (isProductionBuild()) return [];
+
   try {
     const db = await getDb();
     const docs = await db
@@ -82,6 +90,15 @@ export async function listPublishedValidQuizPaks(): Promise<QuizPak[]> {
 }
 
 export async function getQuizPakBySlug(slug: string): Promise<QuizLoadResult> {
+  if (isProductionBuild()) {
+    return {
+      ok: false,
+      code: "not_found",
+      slug,
+      message: "Quiz pak lookup is disabled during production build.",
+    };
+  }
+
   try {
     const db = await getDb();
     const doc = await db.collection(QUIZ_COLLECTION).findOne({ slug, isPublished: true });
