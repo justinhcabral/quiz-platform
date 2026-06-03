@@ -52,7 +52,7 @@ function Cartridge({
 
   return (
     <Link
-      href={`/quizzes/${pak.slug}`}
+      href={`/play?pak=${encodeURIComponent(pak.slug)}`}
       className="group relative w-[170px] shrink-0 transition-transform duration-300 hover:-translate-y-3 hover:rotate-0 focus:outline-none focus-visible:-translate-y-3 focus-visible:rotate-0"
       style={{ transform: `rotate(${rotate}deg)` }}
     >
@@ -158,7 +158,7 @@ export function LandingPage({ paks }: { paks: LandingQuizPak[] }) {
         </h1>
         <p className="mx-auto mt-4 max-w-md text-sm text-white/60">
           Each pak is a self-contained quiz cartridge loaded from MongoDB. Pick
-          one from the shelf, or press start to enter guest mode.
+          one from the shelf to boot through guest mode, or press start to browse.
         </p>
       </section>
 

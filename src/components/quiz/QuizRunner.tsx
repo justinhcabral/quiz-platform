@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, ChevronRight, LockKeyhole, TimerReset, Trophy } from "lucide-react";
 import { createSuspiciousActivityEvent, isScoreInvalidatedBySuspiciousActivity, type SuspiciousActivityEvent, type SuspiciousActivityType } from "../../lib/anti-cheat";
@@ -29,6 +29,10 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
     initialStored?.suspiciousActivityEvents ?? [],
   );
   const [activeSuspiciousEvent, setActiveSuspiciousEvent] = useState<SuspiciousActivityEvent | null>(null);
+  const currentIndexRef = useRef(currentIndex);
+  const lockedAnswersRef = useRef(lockedAnswers);
+  const suspiciousActivityEventsRef = useRef(suspiciousActivityEvents);
+  const lastSuspiciousSignalRef = useRef<{ type: SuspiciousActivityType; at: number } | null>(null);
   const [lastAnswerAt, setLastAnswerAt] = useState(() => Date.parse(run.startedAt));
   const [result, setResult] = useState<QuizResult | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(() =>
@@ -52,18 +56,44 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
   const seconds = remainingSeconds % 60;
   const isScoreInvalidated = isScoreInvalidatedBySuspiciousActivity(suspiciousActivityEvents);
 
-  function recordSuspiciousActivity(type: SuspiciousActivityType) {
-    if (result) return suspiciousActivityEvents;
+  useEffect(() => {
+    currentIndexRef.current = currentIndex;
+    lockedAnswersRef.current = lockedAnswers;
+    suspiciousActivityEventsRef.current = suspiciousActivityEvents;
+  }, [currentIndex, lockedAnswers, suspiciousActivityEvents]);
+
+  const recordSuspiciousActivity = useCallback((type: SuspiciousActivityType) => {
+    if (result) return suspiciousActivityEventsRef.current;
+    if (type === "window_blur" && document.hidden) return suspiciousActivityEventsRef.current;
+
+    const now = Date.now();
+    const lastSignal = lastSuspiciousSignalRef.current;
+    if (lastSignal && now - lastSignal.at < 500) {
+      const isSameSignal = lastSignal.type === type;
+      const isTabBlurPair =
+        (lastSignal.type === "tab_switch" && type === "window_blur") ||
+        (lastSignal.type === "window_blur" && type === "tab_switch");
+      if (isSameSignal || isTabBlurPair) return suspiciousActivityEventsRef.current;
+    }
+    lastSuspiciousSignalRef.current = { type, at: now };
 
     const event = createSuspiciousActivityEvent({
       type,
-      existingCount: suspiciousActivityEvents.length,
+      existingCount: suspiciousActivityEventsRef.current.length,
     });
-    const nextEvents = [...suspiciousActivityEvents, event];
+    const nextEvents = [...suspiciousActivityEventsRef.current, event];
+    suspiciousActivityEventsRef.current = nextEvents;
+    saveActiveQuizRun({
+      quizSlug: quiz.slug,
+      run,
+      currentIndex: currentIndexRef.current,
+      lockedAnswers: lockedAnswersRef.current,
+      suspiciousActivityEvents: nextEvents,
+    });
     setSuspiciousActivityEvents(nextEvents);
     setActiveSuspiciousEvent(event);
     return nextEvents;
-  }
+  }, [quiz.slug, result, run]);
 
   function submitRun(
     nextLockedAnswers: LockedAnswerWithCorrectness[],
@@ -108,18 +138,21 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
     const onBlur = () => recordSuspiciousActivity("window_blur");
     const onCopy = () => recordSuspiciousActivity("copy");
     const onPaste = () => recordSuspiciousActivity("paste");
+    const onPopState = () => recordSuspiciousActivity("navigation_back");
 
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("blur", onBlur);
     window.addEventListener("copy", onCopy);
     window.addEventListener("paste", onPaste);
+    window.addEventListener("popstate", onPopState);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("copy", onCopy);
       window.removeEventListener("paste", onPaste);
+      window.removeEventListener("popstate", onPopState);
     };
-  }, [result, suspiciousActivityEvents]);
+  }, [result, recordSuspiciousActivity]);
 
   useEffect(() => {
     if (result) return;

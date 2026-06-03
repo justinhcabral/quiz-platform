@@ -14,4 +14,15 @@ describe("anti-cheat events", () => {
     expect(isScoreInvalidatedBySuspiciousActivity(events.slice(0, 5))).toBe(false);
     expect(isScoreInvalidatedBySuspiciousActivity(events)).toBe(true);
   });
+
+  it("invalidates immediately when browser back navigation happens during a run", () => {
+    const event = createSuspiciousActivityEvent({
+      type: "navigation_back",
+      existingCount: 0,
+    });
+
+    expect(event.warningNumber).toBe(1);
+    expect(event.invalidatesScore).toBe(true);
+    expect(isScoreInvalidatedBySuspiciousActivity([event])).toBe(true);
+  });
 });

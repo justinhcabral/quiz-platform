@@ -7,7 +7,8 @@ export type SuspiciousActivityType =
   | "paste"
   | "state_tamper"
   | "timer_mismatch"
-  | "impossible_speed";
+  | "impossible_speed"
+  | "navigation_back";
 
 export interface SuspiciousActivityEvent {
   id: string;
@@ -27,6 +28,7 @@ const MESSAGES: Record<SuspiciousActivityType, string> = {
   state_tamper: "Saved quiz state changed unexpectedly and was flagged.",
   timer_mismatch: "Quiz timer state changed unexpectedly and was flagged.",
   impossible_speed: "Answer timing looked impossible and was flagged.",
+  navigation_back: "Browser back navigation during an active quiz run invalidated this score.",
 };
 
 function createId(type: SuspiciousActivityType, occurredAt: string) {
@@ -44,13 +46,15 @@ export function createSuspiciousActivityEvent(input: {
   const limit = input.limit ?? SUSPICIOUS_BEHAVIOR_LIMIT;
   const warningNumber = input.existingCount + 1;
 
+  const invalidatesImmediately = input.type === "navigation_back";
+
   return {
     id: createId(input.type, occurredAt),
     type: input.type,
     occurredAt,
     warningNumber,
     limit,
-    invalidatesScore: warningNumber > limit,
+    invalidatesScore: invalidatesImmediately || warningNumber > limit,
     message: MESSAGES[input.type],
   };
 }
@@ -59,5 +63,5 @@ export function isScoreInvalidatedBySuspiciousActivity(
   events: readonly SuspiciousActivityEvent[],
   limit = SUSPICIOUS_BEHAVIOR_LIMIT,
 ) {
-  return events.length > limit;
+  return events.some((event) => event.invalidatesScore) || events.length > limit;
 }
