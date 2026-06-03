@@ -6,7 +6,15 @@ import { AlertTriangle, ChevronRight, LockKeyhole, TimerReset, Trophy } from "lu
 import { createSuspiciousActivityEvent, isScoreInvalidatedBySuspiciousActivity, type SuspiciousActivityEvent, type SuspiciousActivityType } from "../../lib/anti-cheat";
 import { lockAnswer, scoreQuizRun, type LockedAnswerWithCorrectness, type QuizResult } from "../../lib/quiz-scoring";
 import { getChoiceById, getQuestionById, initializeQuizRun } from "../../lib/quiz-run";
-import { clearActiveQuizRun, loadActiveQuizRun, loadQuizResult, saveActiveQuizRun, saveQuizResult } from "../../lib/quiz-storage";
+import {
+  clearActiveQuizRun,
+  clearQuizResult,
+  consumeQuizStartIntent,
+  loadActiveQuizRun,
+  loadQuizResult,
+  saveActiveQuizRun,
+  saveQuizResult,
+} from "../../lib/quiz-storage";
 import type { QuizPak } from "../../types/quiz";
 
 export function QuizRunner({ quiz }: { quiz: QuizPak }) {
@@ -59,6 +67,11 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
   const isScoreInvalidated = isScoreInvalidatedBySuspiciousActivity(suspiciousActivityEvents);
 
   const blockIfNavigationCancelled = useCallback(() => {
+    if (consumeQuizStartIntent(quiz.slug)) {
+      clearQuizResult(quiz.slug);
+      return false;
+    }
+
     const storedResult = loadQuizResult(quiz.slug);
     const wasCancelledByNavigation = storedResult?.suspiciousActivityEvents.some(
       (event) => event.type === "navigation_back",

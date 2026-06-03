@@ -3,14 +3,25 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { CornerDownLeft, Gamepad2, Power, UserRound } from "lucide-react";
+import { markQuizStartIntent } from "../../lib/quiz-storage";
 
 const NEXT_HREF = "/quizzes";
 
+function getSelectedPak() {
+  return new URLSearchParams(window.location.search).get("pak");
+}
+
 function getNextHref() {
-  const selectedPak = new URLSearchParams(window.location.search).get("pak");
+  const selectedPak = getSelectedPak();
   return selectedPak
     ? `/quizzes/${encodeURIComponent(selectedPak)}`
     : NEXT_HREF;
+}
+
+function continueAsGuest(router: ReturnType<typeof useRouter>) {
+  const selectedPak = getSelectedPak();
+  if (selectedPak) markQuizStartIntent(selectedPak);
+  router.push(getNextHref());
 }
 
 export default function PlayPage() {
@@ -31,7 +42,7 @@ export default function PlayPage() {
         return;
       }
       e.preventDefault();
-      router.push(getNextHref());
+      continueAsGuest(router);
     }
 
     window.addEventListener("keydown", onKey);
@@ -87,7 +98,7 @@ export default function PlayPage() {
 
         <button
           type="button"
-          onClick={() => router.push(getNextHref())}
+          onClick={() => continueAsGuest(router)}
           className="mt-8 inline-flex w-full items-center justify-center gap-3 rounded-2xl bg-gradient-to-b from-yellow-300 to-amber-500 px-7 py-4 font-black tracking-wide text-black shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_0_rgba(0,0,0,.45)] transition active:translate-y-[3px] active:shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_3px_0_rgba(0,0,0,.45)]"
         >
           <Power size={18} strokeWidth={3} />

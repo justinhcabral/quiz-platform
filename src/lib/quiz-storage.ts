@@ -22,6 +22,10 @@ function resultKey(slug: string) {
   return `youquizz:result:${slug}`;
 }
 
+function startIntentKey(slug: string) {
+  return `youquizz:start-intent:${slug}`;
+}
+
 function hasSessionStorage() {
   return typeof window !== "undefined" && typeof window.sessionStorage !== "undefined";
 }
@@ -79,6 +83,28 @@ export function clearActiveQuizRun(slug: string) {
 export function saveQuizResult(result: QuizResult) {
   if (!hasSessionStorage()) return;
   window.sessionStorage.setItem(resultKey(result.quizSlug), JSON.stringify(result));
+}
+
+export function clearQuizResult(slug: string) {
+  if (!hasSessionStorage()) return;
+  window.sessionStorage.removeItem(resultKey(slug));
+}
+
+export function markQuizStartIntent(slug: string) {
+  if (!hasSessionStorage()) return;
+  window.sessionStorage.setItem(startIntentKey(slug), Date.now().toString());
+}
+
+export function consumeQuizStartIntent(slug: string) {
+  if (!hasSessionStorage()) return false;
+
+  const key = startIntentKey(slug);
+  const raw = window.sessionStorage.getItem(key);
+  window.sessionStorage.removeItem(key);
+  if (!raw) return false;
+
+  const createdAt = Number(raw);
+  return Number.isFinite(createdAt) && Date.now() - createdAt < 30_000;
 }
 
 export function loadQuizResult(slug: string): QuizResult | null {
