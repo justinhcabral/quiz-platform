@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { CheckCircle2, CircleX, Trophy } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleX, Trophy } from "lucide-react";
 import { loadQuizResult } from "../../lib/quiz-storage";
 import type { QuizResult } from "../../lib/quiz-scoring";
 
@@ -26,13 +26,18 @@ export function QuizResults({ slug }: { slug: string }) {
     );
   }
 
+  const wasCancelledByNavigation = result.suspiciousActivityEvents.some(
+    (event) => event.type === "navigation_back",
+  );
+  const ResultIcon = wasCancelledByNavigation ? AlertTriangle : Trophy;
+
   return (
     <main className="min-h-screen bg-[#1b1340] px-6 py-10 text-white">
       <section className="mx-auto max-w-5xl">
         <div className="rounded-[2rem] border-2 border-yellow-300/25 bg-black/30 p-6 text-center shadow-[0_12px_0_rgba(0,0,0,.38)] md:p-10">
-          <Trophy className="mx-auto mb-4 text-yellow-300" size={46} />
+          <ResultIcon className={`mx-auto mb-4 ${wasCancelledByNavigation ? "text-rose-200" : "text-yellow-300"}`} size={46} />
           <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/50">
-            run complete
+            {wasCancelledByNavigation ? "run cancelled" : "run complete"}
           </p>
           <h1 className="mt-2 text-5xl font-black">{result.status}</h1>
           <p className="mt-4 text-7xl font-black text-yellow-300">{result.scorePercent}%</p>
@@ -45,7 +50,9 @@ export function QuizResults({ slug }: { slug: string }) {
           </div>
           {result.isScoreInvalidated ? (
             <div className="mt-6 rounded-2xl bg-rose-300 p-4 font-black text-rose-950">
-              SCORE INVALIDATED — suspicious behavior exceeded the allowed limit.
+              {wasCancelledByNavigation
+                ? "SCORE INVALIDATED — browser back navigation cancelled this run. Return to the landing page to start again."
+                : "SCORE INVALIDATED — suspicious behavior exceeded the allowed limit."}
             </div>
           ) : null}
         </div>
@@ -96,8 +103,8 @@ export function QuizResults({ slug }: { slug: string }) {
         </div>
 
         <div className="mt-10 text-center">
-          <Link href="/quizzes" className="inline-block rounded-xl bg-yellow-300 px-5 py-3 font-black text-black">
-            BACK TO LIBRARY
+          <Link href="/" className="inline-block rounded-xl bg-yellow-300 px-5 py-3 font-black text-black">
+            BACK TO LANDING
           </Link>
         </div>
       </section>

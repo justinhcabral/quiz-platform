@@ -33,6 +33,7 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
   const lockedAnswersRef = useRef(lockedAnswers);
   const suspiciousActivityEventsRef = useRef(suspiciousActivityEvents);
   const lastSuspiciousSignalRef = useRef<{ type: SuspiciousActivityType; at: number } | null>(null);
+  const navigationCancelRef = useRef(false);
   const [lastAnswerAt, setLastAnswerAt] = useState(() => Date.parse(run.startedAt));
   const [result, setResult] = useState<QuizResult | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(() =>
@@ -110,6 +111,26 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
     );
   }
 
+  const cancelRunForBrowserBack = useCallback(() => {
+    if (navigationCancelRef.current || result) return;
+    navigationCancelRef.current = true;
+
+    const nextSuspiciousEvents = recordSuspiciousActivity("navigation_back");
+    const cancelledResult = scoreQuizRun({
+      quiz,
+      startedAt: run.startedAt,
+      shuffledQuestions: run.shuffledQuestions,
+      lockedAnswers: lockedAnswersRef.current,
+      suspiciousActivityEvents: nextSuspiciousEvents,
+    });
+    const resultsHref = `/quizzes/${quiz.slug}/results`;
+
+    saveQuizResult(cancelledResult);
+    clearActiveQuizRun(quiz.slug);
+    window.history.replaceState(null, "", resultsHref);
+    router.push(resultsHref);
+  }, [quiz, recordSuspiciousActivity, result, router, run]);
+
   useEffect(() => {
     if (result) return;
 
@@ -132,27 +153,35 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
   useEffect(() => {
     if (result) return;
 
+    window.history.pushState({ youquizzQuizGuard: true }, "", window.location.href);
+
     const onVisibilityChange = () => {
       if (document.hidden) recordSuspiciousActivity("tab_switch");
     };
     const onBlur = () => recordSuspiciousActivity("window_blur");
     const onCopy = () => recordSuspiciousActivity("copy");
     const onPaste = () => recordSuspiciousActivity("paste");
-    const onPopState = () => recordSuspiciousActivity("navigation_back");
+    const onPopState = () => cancelRunForBrowserBack();
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
 
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("blur", onBlur);
     window.addEventListener("copy", onCopy);
     window.addEventListener("paste", onPaste);
     window.addEventListener("popstate", onPopState);
+    window.addEventListener("beforeunload", onBeforeUnload);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("copy", onCopy);
       window.removeEventListener("paste", onPaste);
       window.removeEventListener("popstate", onPopState);
+      window.removeEventListener("beforeunload", onBeforeUnload);
     };
-  }, [result, recordSuspiciousActivity]);
+  }, [cancelRunForBrowserBack, result, recordSuspiciousActivity]);
 
   useEffect(() => {
     if (result) return;
