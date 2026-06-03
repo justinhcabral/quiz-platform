@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, LockKeyhole, TimerReset } from "lucide-react";
 import { getChoiceById, getQuestionById, initializeQuizRun } from "../../lib/quiz-run";
 import type { QuizPak } from "../../types/quiz";
@@ -12,11 +12,19 @@ interface LockedAnswer {
 
 export function QuizRunner({ quiz }: { quiz: QuizPak }) {
   const [run] = useState(() =>
-    initializeQuizRun({ quizSlug: quiz.slug, questions: quiz.questions }),
+    initializeQuizRun({
+      quizSlug: quiz.slug,
+      questions: quiz.questions,
+      difficulty: quiz.difficulty,
+    }),
   );
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null);
   const [lockedAnswers, setLockedAnswers] = useState<LockedAnswer[]>([]);
+  const [remainingSeconds, setRemainingSeconds] = useState(() =>
+    Math.max(0, Math.ceil((Date.parse(run.timerEndsAt) - Date.now()) / 1000)),
+  );
+  const [isAutoSubmitted, setIsAutoSubmitted] = useState(false);
 
   const currentSlot = run.shuffledQuestions[currentIndex];
   const currentQuestion = useMemo(
@@ -24,15 +32,36 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
     [currentSlot.questionId, quiz.questions],
   );
 
+  const choices = currentQuestion
+    ? currentSlot.choiceIds
+        .map((id) => getChoiceById(currentQuestion, id))
+        .filter((choice): choice is NonNullable<typeof choice> => Boolean(choice))
+    : [];
+  const isLastQuestion = currentIndex === run.shuffledQuestions.length - 1;
+  const answeredCount = lockedAnswers.length + (selectedChoiceId ? 1 : 0);
+  const minutes = Math.floor(remainingSeconds / 60);
+  const seconds = remainingSeconds % 60;
+
+  useEffect(() => {
+    if (isAutoSubmitted) return;
+
+    const tick = () => {
+      const nextRemaining = Math.max(
+        0,
+        Math.ceil((Date.parse(run.timerEndsAt) - Date.now()) / 1000),
+      );
+      setRemainingSeconds(nextRemaining);
+      if (nextRemaining <= 0) setIsAutoSubmitted(true);
+    };
+
+    tick();
+    const id = window.setInterval(tick, 500);
+    return () => window.clearInterval(id);
+  }, [isAutoSubmitted, run.timerEndsAt]);
+
   if (!currentQuestion) {
     return <div className="text-rose-200">PAK CORRUPTED: missing question.</div>;
   }
-
-  const choices = currentSlot.choiceIds
-    .map((id) => getChoiceById(currentQuestion, id))
-    .filter((choice): choice is NonNullable<typeof choice> => Boolean(choice));
-  const isLastQuestion = currentIndex === run.shuffledQuestions.length - 1;
-  const answeredCount = lockedAnswers.length + (selectedChoiceId ? 1 : 0);
 
   function lockAndAdvance() {
     if (!selectedChoiceId || !currentQuestion) return;
@@ -62,8 +91,13 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
               {quiz.category} · {quiz.difficulty.toUpperCase()} · pass at {quiz.passingScore}%
             </p>
           </div>
-          <div className="flex items-center gap-3 rounded-xl bg-black/25 px-4 py-3 font-mono text-xs uppercase tracking-[0.16em] text-white/75">
-            <TimerReset size={15} /> Q{currentIndex + 1}/{run.shuffledQuestions.length}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-3 rounded-xl bg-black/25 px-4 py-3 font-mono text-xs uppercase tracking-[0.16em] text-white/75">
+              <TimerReset size={15} /> Q{currentIndex + 1}/{run.shuffledQuestions.length}
+            </div>
+            <div className={`rounded-xl px-4 py-3 font-mono text-xs uppercase tracking-[0.16em] ${remainingSeconds <= 30 ? "bg-rose-400 text-rose-950" : "bg-yellow-300 text-black"}`}>
+              {minutes}:{String(seconds).padStart(2, "0")}
+            </div>
           </div>
         </div>
         <div className="mt-5 h-3 overflow-hidden rounded-full bg-black/30">
@@ -74,6 +108,15 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
         </div>
       </div>
 
+      {isAutoSubmitted ? (
+        <article className="rounded-[2rem] border-2 border-rose-300/40 bg-rose-950/45 p-8 text-center shadow-[0_12px_0_rgba(0,0,0,.4)]">
+          <h2 className="text-3xl font-black">TIME UP</h2>
+          <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-white/65">
+            The quiz run auto-submitted when the timer hit zero. Scoring and
+            results are wired in the next slice.
+          </p>
+        </article>
+      ) : (
       <article className="rounded-[2rem] border-2 border-black/30 bg-gradient-to-b from-amber-100 to-orange-200 p-5 text-slate-950 shadow-[inset_0_2px_0_rgba(255,255,255,.7),0_12px_0_rgba(0,0,0,.4)] md:p-8">
         <div className="mb-5 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.2em] text-slate-600">
           <span>question card</span>
@@ -103,7 +146,9 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
           ))}
         </div>
       </article>
+      )}
 
+      {!isAutoSubmitted && (
       <div className="mt-8 flex flex-col items-center justify-between gap-4 md:flex-row">
         <p className="flex items-center gap-2 text-sm text-white/55">
           <LockKeyhole size={15} /> Answers lock when you press next. No backtracking.
@@ -118,6 +163,7 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
           <ChevronRight size={18} strokeWidth={3} />
         </button>
       </div>
+      )}
     </section>
   );
 }
