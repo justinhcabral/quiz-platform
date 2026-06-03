@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ChevronRight, LockKeyhole, TimerReset, Trophy } from "lucide-react";
 import { lockAnswer, scoreQuizRun, type LockedAnswerWithCorrectness, type QuizResult } from "../../lib/quiz-scoring";
 import { getChoiceById, getQuestionById, initializeQuizRun } from "../../lib/quiz-run";
@@ -8,6 +9,7 @@ import { clearActiveQuizRun, loadActiveQuizRun, saveActiveQuizRun, saveQuizResul
 import type { QuizPak } from "../../types/quiz";
 
 export function QuizRunner({ quiz }: { quiz: QuizPak }) {
+  const router = useRouter();
   const [initialStored] = useState(() => loadActiveQuizRun(quiz.slug));
   const [run] = useState(() =>
     initialStored?.run ??
@@ -69,7 +71,8 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
     if (!result) return;
     saveQuizResult(result);
     clearActiveQuizRun(quiz.slug);
-  }, [quiz.slug, result]);
+    router.push(`/quizzes/${quiz.slug}/results`);
+  }, [quiz.slug, result, router]);
 
   useEffect(() => {
     if (result) return;
