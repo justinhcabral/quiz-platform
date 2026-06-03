@@ -1,13 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2, CircleX, Trophy } from "lucide-react";
 import { loadQuizResult } from "../../lib/quiz-storage";
 import type { QuizResult } from "../../lib/quiz-scoring";
 
 export function QuizResults({ slug }: { slug: string }) {
-  const [result] = useState<QuizResult | null>(() => loadQuizResult(slug));
+  const [hasMounted, setHasMounted] = useState(false);
+  const [result, setResult] = useState<QuizResult | null>(null);
+
+  useEffect(() => {
+    setResult(loadQuizResult(slug));
+    setHasMounted(true);
+  }, [slug]);
+
+  if (!hasMounted) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#1b1340] px-6 text-white">
+        <section className="max-w-xl rounded-[2rem] border-2 border-white/15 bg-white/10 p-8 text-center shadow-[0_10px_0_rgba(0,0,0,.35)]">
+          <h1 className="text-3xl font-black">LOADING RESULT</h1>
+          <p className="mt-3 text-sm leading-6 text-white/60">
+            Reading guest result from this browser session.
+          </p>
+        </section>
+      </main>
+    );
+  }
 
   if (!result) {
     return (
