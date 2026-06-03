@@ -1,33 +1,65 @@
 /**
- * Forces Node's DNS resolver to use Cloudflare (1.1.1.1, 1.0.0.1) before
- * any MongoDB connection is opened.
+ * DNS helpers for MongoDB SRV lookups.
  *
- * Why: `mongodb+srv://` URIs require an SRV lookup. On Windows boxes and
- * corporate networks the OS-default resolver frequently fails or stalls
- * with `querySrv ETIMEOUT` / `ENOTFOUND`. Pinning to a public resolver
- * sidesteps that whole class of issue.
- *
- * This file is import-for-side-effect. Import it FIRST in any module that
- * opens a Mongo connection (db.ts and mongoose.ts already do).
+ * Atlas `mongodb+srv://` URIs require DNS SRV resolution. On Windows and
+ * corporate networks, the OS resolver or public resolvers may fail differently
+ * (`querySrv ETIMEOUT` / `ECONNREFUSED`). Mongo connection code uses these
+ * helpers to retry with multiple resolver sets before giving up.
  */
 
-import { setServers } from "node:dns";
+import { getServers, setServers } from "node:dns";
 
-const DNS_SERVERS = ["1.1.1.1", "1.0.0.1"];
+const CLOUDFLARE_DNS = ["1.1.1.1", "1.0.0.1"];
+const GOOGLE_DNS = ["8.8.8.8", "8.8.4.4"];
+const QUAD9_DNS = ["9.9.9.9", "149.112.112.112"];
+
+interface DnsPinState {
+  originalServers: string[];
+}
 
 declare global {
   // eslint-disable-next-line no-var
-  var __dnsPinned__: boolean | undefined;
+  var __youquizzDnsPinState__: DnsPinState | undefined;
 }
 
-if (!globalThis.__dnsPinned__) {
+const state: DnsPinState =
+  globalThis.__youquizzDnsPinState__ ??
+  (globalThis.__youquizzDnsPinState__ = {
+    originalServers: getServers(),
+  });
+
+function uniqueResolverSets(sets: string[][]) {
+  const seen = new Set<string>();
+  return sets.filter((servers) => {
+    const key = servers.join(",");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return servers.length > 0;
+  });
+}
+
+export function mongoDnsResolverCandidates() {
+  return uniqueResolverSets([
+    state.originalServers,
+    CLOUDFLARE_DNS,
+    GOOGLE_DNS,
+    QUAD9_DNS,
+  ]);
+}
+
+export function useMongoDnsServers(servers: string[]) {
+  setServers(servers);
+}
+
+export function restoreOriginalDns() {
   try {
-    setServers(DNS_SERVERS);
-    globalThis.__dnsPinned__ = true;
+    setServers(state.originalServers);
   } catch (err) {
-    // Non-fatal: if the platform refuses, fall back to OS resolver.
-    console.warn("[dns] failed to pin servers, using OS default", err);
+    console.warn("[dns] failed to restore OS DNS resolver", err);
   }
 }
 
-export {};
+export function isSrvLookupFailure(err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("querySrv") || message.includes("ETIMEOUT") || message.includes("ECONNREFUSED");
+}

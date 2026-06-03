@@ -1,7 +1,7 @@
 /**
  * Mongoose connection singleton.
  *
- * - DNS pinned to 1.1.1.1 before connecting (see ./dns).
+ * - DNS SRV lookup retries several resolver sets before giving up (see ./dns).
  * - Cached on `globalThis` so Next.js HMR / Lambda warm starts reuse the
  *   same connection instead of leaking pools.
  * - The DB name is taken from the URI path unless `MONGODB_DB` overrides.
@@ -10,7 +10,7 @@
  * slice-3 repository use the native driver via ./db.ts.
  */
 
-import "./dns";
+import { isSrvLookupFailure, mongoDnsResolverCandidates, restoreOriginalDns, useMongoDnsServers } from "./dns";
 import mongoose, { type Mongoose } from "mongoose";
 
 interface MongooseCache {
@@ -26,6 +26,14 @@ declare global {
 const cache: MongooseCache =
   globalThis.__mongooseCache__ ?? (globalThis.__mongooseCache__ = { conn: null, promise: null });
 
+function connect(uri: string) {
+  return mongoose.connect(uri, {
+    dbName: process.env.MONGODB_DB || undefined,
+    bufferCommands: false,
+    serverSelectionTimeoutMS: 10_000,
+  });
+}
+
 export async function connectMongoose(): Promise<Mongoose> {
   if (cache.conn) return cache.conn;
 
@@ -35,10 +43,24 @@ export async function connectMongoose(): Promise<Mongoose> {
   }
 
   if (!cache.promise) {
-    cache.promise = mongoose.connect(uri, {
-      dbName: process.env.MONGODB_DB || undefined,
-      bufferCommands: false,
-      serverSelectionTimeoutMS: 10_000,
+    cache.promise = (async () => {
+      let lastSrvError: unknown;
+
+      for (const servers of mongoDnsResolverCandidates()) {
+        try {
+          useMongoDnsServers(servers);
+          return await connect(uri);
+        } catch (err) {
+          if (!isSrvLookupFailure(err)) throw err;
+          lastSrvError = err;
+        }
+      }
+
+      restoreOriginalDns();
+      throw lastSrvError;
+    })().catch((err) => {
+      cache.promise = null;
+      throw err;
     });
   }
 

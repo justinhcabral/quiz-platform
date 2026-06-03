@@ -1,7 +1,7 @@
 /**
  * Native MongoDB driver singleton.
  *
- * - DNS is pinned to 1.1.1.1 before the client is constructed (see ./dns).
+ * - DNS SRV lookup retries several resolver sets before giving up (see ./dns).
  * - In dev, the client promise is cached on `globalThis` so Next.js HMR
  *   doesn't open a fresh pool on every reload.
  * - The DB name is taken from the URI path (e.g. `.../youquizz`) unless
@@ -12,7 +12,7 @@
  * mongoose features (schemas, hooks).
  */
 
-import "./dns";
+import { isSrvLookupFailure, mongoDnsResolverCandidates, restoreOriginalDns, useMongoDnsServers } from "./dns";
 import { MongoClient, type Db } from "mongodb";
 
 declare global {
@@ -20,20 +20,41 @@ declare global {
   var __mongoClientPromise__: Promise<MongoClient> | undefined;
 }
 
-function createClientPromise(): Promise<MongoClient> {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) {
-    throw new Error("MONGODB_URI is not set. Add it to .env.local.");
-  }
+function connectClient(uri: string): Promise<MongoClient> {
   return new MongoClient(uri, {
     maxPoolSize: 10,
     serverSelectionTimeoutMS: 10_000,
   }).connect();
 }
 
+async function createClientPromise(): Promise<MongoClient> {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) {
+    throw new Error("MONGODB_URI is not set. Add it to .env.local.");
+  }
+
+  let lastSrvError: unknown;
+
+  for (const servers of mongoDnsResolverCandidates()) {
+    try {
+      useMongoDnsServers(servers);
+      return await connectClient(uri);
+    } catch (err) {
+      if (!isSrvLookupFailure(err)) throw err;
+      lastSrvError = err;
+    }
+  }
+
+  restoreOriginalDns();
+  throw lastSrvError;
+}
+
 function clientPromise(): Promise<MongoClient> {
   if (!globalThis.__mongoClientPromise__) {
-    globalThis.__mongoClientPromise__ = createClientPromise();
+    globalThis.__mongoClientPromise__ = createClientPromise().catch((err) => {
+      globalThis.__mongoClientPromise__ = undefined;
+      throw err;
+    });
   }
   return globalThis.__mongoClientPromise__;
 }
