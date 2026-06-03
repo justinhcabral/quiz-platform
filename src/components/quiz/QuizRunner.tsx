@@ -4,19 +4,24 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, LockKeyhole, TimerReset, Trophy } from "lucide-react";
 import { lockAnswer, scoreQuizRun, type LockedAnswerWithCorrectness, type QuizResult } from "../../lib/quiz-scoring";
 import { getChoiceById, getQuestionById, initializeQuizRun } from "../../lib/quiz-run";
+import { clearActiveQuizRun, loadActiveQuizRun, saveActiveQuizRun, saveQuizResult } from "../../lib/quiz-storage";
 import type { QuizPak } from "../../types/quiz";
 
 export function QuizRunner({ quiz }: { quiz: QuizPak }) {
+  const [initialStored] = useState(() => loadActiveQuizRun(quiz.slug));
   const [run] = useState(() =>
+    initialStored?.run ??
     initializeQuizRun({
       quizSlug: quiz.slug,
       questions: quiz.questions,
       difficulty: quiz.difficulty,
     }),
   );
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(initialStored?.currentIndex ?? 0);
   const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null);
-  const [lockedAnswers, setLockedAnswers] = useState<LockedAnswerWithCorrectness[]>([]);
+  const [lockedAnswers, setLockedAnswers] = useState<LockedAnswerWithCorrectness[]>(
+    initialStored?.lockedAnswers ?? [],
+  );
   const [result, setResult] = useState<QuizResult | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(() =>
     Math.max(0, Math.ceil((Date.parse(run.timerEndsAt) - Date.now()) / 1000)),
@@ -48,6 +53,23 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
       }),
     );
   }
+
+  useEffect(() => {
+    if (result) return;
+
+    saveActiveQuizRun({
+      quizSlug: quiz.slug,
+      run,
+      currentIndex,
+      lockedAnswers,
+    });
+  }, [currentIndex, lockedAnswers, quiz.slug, result, run]);
+
+  useEffect(() => {
+    if (!result) return;
+    saveQuizResult(result);
+    clearActiveQuizRun(quiz.slug);
+  }, [quiz.slug, result]);
 
   useEffect(() => {
     if (result) return;
