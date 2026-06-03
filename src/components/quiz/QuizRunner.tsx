@@ -6,7 +6,7 @@ import { AlertTriangle, ChevronRight, LockKeyhole, TimerReset, Trophy } from "lu
 import { createSuspiciousActivityEvent, isScoreInvalidatedBySuspiciousActivity, type SuspiciousActivityEvent, type SuspiciousActivityType } from "../../lib/anti-cheat";
 import { lockAnswer, scoreQuizRun, type LockedAnswerWithCorrectness, type QuizResult } from "../../lib/quiz-scoring";
 import { getChoiceById, getQuestionById, initializeQuizRun } from "../../lib/quiz-run";
-import { clearActiveQuizRun, loadActiveQuizRun, saveActiveQuizRun, saveQuizResult } from "../../lib/quiz-storage";
+import { clearActiveQuizRun, loadActiveQuizRun, loadQuizResult, saveActiveQuizRun, saveQuizResult } from "../../lib/quiz-storage";
 import type { QuizPak } from "../../types/quiz";
 
 export function QuizRunner({ quiz }: { quiz: QuizPak }) {
@@ -36,6 +36,7 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
   const navigationCancelRef = useRef(false);
   const [lastAnswerAt, setLastAnswerAt] = useState(() => Date.parse(run.startedAt));
   const [result, setResult] = useState<QuizResult | null>(null);
+  const [isRunBlocked, setIsRunBlocked] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(() =>
     Math.max(0, Math.ceil((Date.parse(run.timerEndsAt) - Date.now()) / 1000)),
   );
@@ -56,6 +57,28 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
   const minutes = Math.floor(remainingSeconds / 60);
   const seconds = remainingSeconds % 60;
   const isScoreInvalidated = isScoreInvalidatedBySuspiciousActivity(suspiciousActivityEvents);
+
+  const blockIfNavigationCancelled = useCallback(() => {
+    const storedResult = loadQuizResult(quiz.slug);
+    const wasCancelledByNavigation = storedResult?.suspiciousActivityEvents.some(
+      (event) => event.type === "navigation_back",
+    );
+
+    if (!wasCancelledByNavigation) return false;
+
+    setIsRunBlocked(true);
+    clearActiveQuizRun(quiz.slug);
+    router.replace(`/quizzes/${quiz.slug}/results`);
+    return true;
+  }, [quiz.slug, router]);
+
+  useEffect(() => {
+    blockIfNavigationCancelled();
+
+    const onPageShow = () => blockIfNavigationCancelled();
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, [blockIfNavigationCancelled]);
 
   useEffect(() => {
     currentIndexRef.current = currentIndex;
@@ -112,8 +135,9 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
   }
 
   const cancelRunForBrowserBack = useCallback(() => {
-    if (navigationCancelRef.current || result) return;
+    if (navigationCancelRef.current || result || isRunBlocked) return;
     navigationCancelRef.current = true;
+    setIsRunBlocked(true);
 
     const nextSuspiciousEvents = recordSuspiciousActivity("navigation_back");
     const cancelledResult = scoreQuizRun({
@@ -128,11 +152,11 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
     saveQuizResult(cancelledResult);
     clearActiveQuizRun(quiz.slug);
     window.history.replaceState(null, "", resultsHref);
-    router.push(resultsHref);
-  }, [quiz, recordSuspiciousActivity, result, router, run]);
+    router.replace(resultsHref);
+  }, [isRunBlocked, quiz, recordSuspiciousActivity, result, router, run]);
 
   useEffect(() => {
-    if (result) return;
+    if (result || isRunBlocked) return;
 
     saveActiveQuizRun({
       quizSlug: quiz.slug,
@@ -141,7 +165,7 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
       lockedAnswers,
       suspiciousActivityEvents,
     });
-  }, [currentIndex, lockedAnswers, quiz.slug, result, run, suspiciousActivityEvents]);
+  }, [currentIndex, isRunBlocked, lockedAnswers, quiz.slug, result, run, suspiciousActivityEvents]);
 
   useEffect(() => {
     if (!result) return;
@@ -151,7 +175,8 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
   }, [quiz.slug, result, router]);
 
   useEffect(() => {
-    if (result) return;
+    if (result || isRunBlocked) return;
+    if (blockIfNavigationCancelled()) return;
 
     window.history.pushState({ youquizzQuizGuard: true }, "", window.location.href);
 
@@ -181,10 +206,10 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
       window.removeEventListener("popstate", onPopState);
       window.removeEventListener("beforeunload", onBeforeUnload);
     };
-  }, [cancelRunForBrowserBack, result, recordSuspiciousActivity]);
+  }, [blockIfNavigationCancelled, cancelRunForBrowserBack, isRunBlocked, result, recordSuspiciousActivity]);
 
   useEffect(() => {
-    if (result) return;
+    if (result || isRunBlocked) return;
 
     const tick = () => {
       const nextRemaining = Math.max(
@@ -198,7 +223,21 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
     tick();
     const id = window.setInterval(tick, 500);
     return () => window.clearInterval(id);
-  }, [lockedAnswers, result, run.shuffledQuestions, run.startedAt, run.timerEndsAt, quiz, suspiciousActivityEvents]);
+  }, [isRunBlocked, lockedAnswers, result, run.shuffledQuestions, run.startedAt, run.timerEndsAt, quiz, suspiciousActivityEvents]);
+
+  if (isRunBlocked) {
+    return (
+      <section className="grid min-h-screen place-items-center px-6 text-center text-white">
+        <div className="max-w-xl rounded-[2rem] border-2 border-rose-300/35 bg-black/30 p-8 shadow-[0_12px_0_rgba(0,0,0,.4)]">
+          <AlertTriangle className="mx-auto mb-4 text-rose-200" size={42} />
+          <h1 className="text-3xl font-black">RUN INVALIDATED</h1>
+          <p className="mt-3 text-sm leading-6 text-white/65">
+            Browser navigation cancelled this quiz. Redirecting to the invalidated result.
+          </p>
+        </div>
+      </section>
+    );
+  }
 
   if (!currentQuestion) {
     return <div className="text-rose-200">PAK CORRUPTED: missing question.</div>;
