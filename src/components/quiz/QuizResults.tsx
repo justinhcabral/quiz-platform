@@ -36,13 +36,32 @@ export function QuizResults({ slug }: { slug: string }) {
           </p>
           <h1 className="mt-2 text-5xl font-black">{result.status}</h1>
           <p className="mt-4 text-7xl font-black text-yellow-300">{result.scorePercent}%</p>
-          <div className="mt-6 grid gap-3 font-mono text-xs uppercase tracking-[0.14em] text-white/70 sm:grid-cols-4">
+          <div className="mt-6 grid gap-3 font-mono text-xs uppercase tracking-[0.14em] text-white/70 sm:grid-cols-5">
             <div className="rounded-xl bg-white/10 p-4">pass {result.passingScore}%</div>
             <div className="rounded-xl bg-white/10 p-4">correct {result.correctCount}</div>
             <div className="rounded-xl bg-white/10 p-4">missed {result.incorrectCount}</div>
             <div className="rounded-xl bg-white/10 p-4">time {result.elapsedSeconds}s</div>
+            <div className={`rounded-xl p-4 ${result.isScoreInvalidated ? "bg-rose-300 text-rose-950" : "bg-white/10"}`}>flags {result.suspiciousActivityCount}/5</div>
           </div>
+          {result.isScoreInvalidated ? (
+            <div className="mt-6 rounded-2xl bg-rose-300 p-4 font-black text-rose-950">
+              SCORE INVALIDATED — suspicious behavior exceeded the allowed limit.
+            </div>
+          ) : null}
         </div>
+
+        {result.suspiciousActivityEvents.length > 0 ? (
+          <div className="mt-8 rounded-2xl border border-rose-300/25 bg-rose-950/25 p-5">
+            <h2 className="font-mono text-xs uppercase tracking-[0.2em] text-rose-100">flag log</h2>
+            <ul className="mt-4 space-y-2 text-sm text-white/70">
+              {result.suspiciousActivityEvents.map((event) => (
+                <li key={event.id} className="rounded-xl bg-black/20 p-3">
+                  #{event.warningNumber} {event.type.replaceAll("_", " ")} · {new Date(event.occurredAt).toLocaleTimeString()}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         <div className="mt-10 space-y-4">
           {result.review.map((item, index) => (

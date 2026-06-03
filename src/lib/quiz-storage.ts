@@ -1,3 +1,4 @@
+import type { SuspiciousActivityEvent } from "./anti-cheat";
 import type { QuizResult, LockedAnswerWithCorrectness } from "./quiz-scoring";
 import type { InitializedQuizRun } from "./quiz-run";
 
@@ -9,6 +10,7 @@ export interface StoredActiveQuizRun {
   run: InitializedQuizRun;
   currentIndex: number;
   lockedAnswers: LockedAnswerWithCorrectness[];
+  suspiciousActivityEvents: SuspiciousActivityEvent[];
   savedAt: string;
 }
 
@@ -44,7 +46,12 @@ export function loadActiveQuizRun(slug: string): StoredActiveQuizRun | null {
       return null;
     }
 
-    return parsed as StoredActiveQuizRun;
+    return {
+      ...parsed,
+      suspiciousActivityEvents: Array.isArray(parsed.suspiciousActivityEvents)
+        ? parsed.suspiciousActivityEvents
+        : [],
+    } as StoredActiveQuizRun;
   } catch {
     window.sessionStorage.removeItem(activeRunKey(slug));
     return null;

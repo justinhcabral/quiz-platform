@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronRight, LockKeyhole, TimerReset, Trophy } from "lucide-react";
+import { AlertTriangle, ChevronRight, LockKeyhole, TimerReset, Trophy } from "lucide-react";
+import { createSuspiciousActivityEvent, isScoreInvalidatedBySuspiciousActivity, type SuspiciousActivityEvent, type SuspiciousActivityType } from "../../lib/anti-cheat";
 import { lockAnswer, scoreQuizRun, type LockedAnswerWithCorrectness, type QuizResult } from "../../lib/quiz-scoring";
 import { getChoiceById, getQuestionById, initializeQuizRun } from "../../lib/quiz-run";
 import { clearActiveQuizRun, loadActiveQuizRun, saveActiveQuizRun, saveQuizResult } from "../../lib/quiz-storage";
@@ -24,6 +25,11 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
   const [lockedAnswers, setLockedAnswers] = useState<LockedAnswerWithCorrectness[]>(
     initialStored?.lockedAnswers ?? [],
   );
+  const [suspiciousActivityEvents, setSuspiciousActivityEvents] = useState<SuspiciousActivityEvent[]>(
+    initialStored?.suspiciousActivityEvents ?? [],
+  );
+  const [activeSuspiciousEvent, setActiveSuspiciousEvent] = useState<SuspiciousActivityEvent | null>(null);
+  const [lastAnswerAt, setLastAnswerAt] = useState(() => Date.parse(run.startedAt));
   const [result, setResult] = useState<QuizResult | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(() =>
     Math.max(0, Math.ceil((Date.parse(run.timerEndsAt) - Date.now()) / 1000)),
@@ -44,14 +50,32 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
   const answeredCount = lockedAnswers.length + (selectedChoiceId ? 1 : 0);
   const minutes = Math.floor(remainingSeconds / 60);
   const seconds = remainingSeconds % 60;
+  const isScoreInvalidated = isScoreInvalidatedBySuspiciousActivity(suspiciousActivityEvents);
 
-  function submitRun(nextLockedAnswers: LockedAnswerWithCorrectness[]) {
+  function recordSuspiciousActivity(type: SuspiciousActivityType) {
+    if (result) return suspiciousActivityEvents;
+
+    const event = createSuspiciousActivityEvent({
+      type,
+      existingCount: suspiciousActivityEvents.length,
+    });
+    const nextEvents = [...suspiciousActivityEvents, event];
+    setSuspiciousActivityEvents(nextEvents);
+    setActiveSuspiciousEvent(event);
+    return nextEvents;
+  }
+
+  function submitRun(
+    nextLockedAnswers: LockedAnswerWithCorrectness[],
+    nextSuspiciousEvents = suspiciousActivityEvents,
+  ) {
     setResult(
       scoreQuizRun({
         quiz,
         startedAt: run.startedAt,
         shuffledQuestions: run.shuffledQuestions,
         lockedAnswers: nextLockedAnswers,
+        suspiciousActivityEvents: nextSuspiciousEvents,
       }),
     );
   }
@@ -64,8 +88,9 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
       run,
       currentIndex,
       lockedAnswers,
+      suspiciousActivityEvents,
     });
-  }, [currentIndex, lockedAnswers, quiz.slug, result, run]);
+  }, [currentIndex, lockedAnswers, quiz.slug, result, run, suspiciousActivityEvents]);
 
   useEffect(() => {
     if (!result) return;
@@ -73,6 +98,28 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
     clearActiveQuizRun(quiz.slug);
     router.push(`/quizzes/${quiz.slug}/results`);
   }, [quiz.slug, result, router]);
+
+  useEffect(() => {
+    if (result) return;
+
+    const onVisibilityChange = () => {
+      if (document.hidden) recordSuspiciousActivity("tab_switch");
+    };
+    const onBlur = () => recordSuspiciousActivity("window_blur");
+    const onCopy = () => recordSuspiciousActivity("copy");
+    const onPaste = () => recordSuspiciousActivity("paste");
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("copy", onCopy);
+    window.addEventListener("paste", onPaste);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("copy", onCopy);
+      window.removeEventListener("paste", onPaste);
+    };
+  }, [result, suspiciousActivityEvents]);
 
   useEffect(() => {
     if (result) return;
@@ -89,7 +136,7 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
     tick();
     const id = window.setInterval(tick, 500);
     return () => window.clearInterval(id);
-  }, [lockedAnswers, result, run.shuffledQuestions, run.startedAt, run.timerEndsAt, quiz]);
+  }, [lockedAnswers, result, run.shuffledQuestions, run.startedAt, run.timerEndsAt, quiz, suspiciousActivityEvents]);
 
   if (!currentQuestion) {
     return <div className="text-rose-200">PAK CORRUPTED: missing question.</div>;
@@ -97,6 +144,13 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
 
   function lockAndAdvance() {
     if (!selectedChoiceId || !currentQuestion) return;
+
+    let nextSuspiciousEvents = suspiciousActivityEvents;
+    const now = Date.now();
+    if (now - lastAnswerAt < 300) {
+      nextSuspiciousEvents = recordSuspiciousActivity("impossible_speed");
+    }
+    setLastAnswerAt(now);
 
     const locked = lockAnswer({
       quiz,
@@ -108,7 +162,7 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
     setSelectedChoiceId(null);
 
     if (isLastQuestion) {
-      submitRun(nextLockedAnswers);
+      submitRun(nextLockedAnswers, nextSuspiciousEvents);
     } else {
       setCurrentIndex((index) => index + 1);
     }
@@ -116,6 +170,31 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
 
   return (
     <section className="relative mx-auto max-w-4xl px-6 py-10 text-white">
+      {activeSuspiciousEvent ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 px-6">
+          <section className="max-w-md rounded-[2rem] border-2 border-rose-300/40 bg-[#2a1d5e] p-6 text-center shadow-[0_12px_0_rgba(0,0,0,.45)]">
+            <AlertTriangle className="mx-auto mb-3 text-rose-200" size={42} />
+            <h2 className="text-3xl font-black">FLAGGED</h2>
+            <p className="mt-3 text-sm leading-6 text-white/70">{activeSuspiciousEvent.message}</p>
+            <p className="mt-4 font-mono text-xs uppercase tracking-[0.18em] text-yellow-200">
+              warning {activeSuspiciousEvent.warningNumber}/{activeSuspiciousEvent.limit}
+            </p>
+            {activeSuspiciousEvent.invalidatesScore ? (
+              <p className="mt-3 rounded-xl bg-rose-300 px-3 py-2 text-sm font-black text-rose-950">
+                Score invalidated. You may finish the run, but this score will not count.
+              </p>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setActiveSuspiciousEvent(null)}
+              className="mt-5 rounded-xl bg-yellow-300 px-5 py-3 font-black text-black"
+            >
+              CONTINUE RUN
+            </button>
+          </section>
+        </div>
+      ) : null}
+
       <div className="mb-6 rounded-[1.5rem] border border-white/15 bg-white/10 p-5 shadow-[0_8px_0_rgba(0,0,0,.3)]">
         <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
           <div>
@@ -134,6 +213,9 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
             <div className={`rounded-xl px-4 py-3 font-mono text-xs uppercase tracking-[0.16em] ${remainingSeconds <= 30 ? "bg-rose-400 text-rose-950" : "bg-yellow-300 text-black"}`}>
               {minutes}:{String(seconds).padStart(2, "0")}
             </div>
+            <div className={`rounded-xl px-4 py-3 font-mono text-xs uppercase tracking-[0.16em] ${isScoreInvalidated ? "bg-rose-300 text-rose-950" : "bg-white/10 text-white/70"}`}>
+              flags {suspiciousActivityEvents.length}/5
+            </div>
           </div>
         </div>
         <div className="mt-5 h-3 overflow-hidden rounded-full bg-black/30">
@@ -150,7 +232,7 @@ export function QuizRunner({ quiz }: { quiz: QuizPak }) {
           <h2 className="text-4xl font-black">{result.status}</h2>
           <p className="mt-3 text-6xl font-black text-yellow-300">{result.scorePercent}%</p>
           <p className="mt-3 text-sm text-white/60">
-            {result.correctCount}/{result.totalQuestions} correct · full review unlocks in the results slice
+            {result.correctCount}/{result.totalQuestions} correct · opening results screen
           </p>
         </article>
       ) : (

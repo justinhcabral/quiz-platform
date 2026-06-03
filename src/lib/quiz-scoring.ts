@@ -1,3 +1,4 @@
+import { isScoreInvalidatedBySuspiciousActivity, type SuspiciousActivityEvent } from "./anti-cheat";
 import type { QuizPak } from "../types/quiz";
 import { getChoiceById, getQuestionById, type ShuffledQuestion } from "./quiz-run";
 
@@ -35,6 +36,9 @@ export interface QuizResult {
   status: "RUN CLEARED" | "TRY AGAIN";
   answers: LockedAnswerWithCorrectness[];
   review: QuestionReviewItem[];
+  suspiciousActivityEvents: SuspiciousActivityEvent[];
+  suspiciousActivityCount: number;
+  isScoreInvalidated: boolean;
 }
 
 export function lockAnswer(input: {
@@ -61,6 +65,7 @@ export function scoreQuizRun(input: {
   submittedAt?: string;
   shuffledQuestions: ShuffledQuestion[];
   lockedAnswers: LockedAnswerWithCorrectness[];
+  suspiciousActivityEvents?: SuspiciousActivityEvent[];
 }): QuizResult {
   const submittedAt = input.submittedAt ?? new Date().toISOString();
   const byQuestionId = new Map(
@@ -84,6 +89,7 @@ export function scoreQuizRun(input: {
     } satisfies LockedAnswerWithCorrectness;
   });
 
+  const suspiciousActivityEvents = input.suspiciousActivityEvents ?? [];
   const correctCount = answers.filter((answer) => answer.isCorrect).length;
   const totalQuestions = input.shuffledQuestions.length;
   const scorePercent = Math.round((correctCount / totalQuestions) * 100);
@@ -134,5 +140,8 @@ export function scoreQuizRun(input: {
     status: scorePercent >= passingScore ? "RUN CLEARED" : "TRY AGAIN",
     answers,
     review,
+    suspiciousActivityEvents,
+    suspiciousActivityCount: suspiciousActivityEvents.length,
+    isScoreInvalidated: isScoreInvalidatedBySuspiciousActivity(suspiciousActivityEvents),
   };
 }
