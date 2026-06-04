@@ -42,3 +42,6 @@ next-env.d.ts
 
 # local-only database utilities
 scripts/seed-quizzes.ts
+
+# local-only prompts
+prompts/
